@@ -1,5 +1,12 @@
 # Operating Manual
 
+> **v2 note:** with `pipeline.engine: v2` (the default in
+> `config.example.yaml`), the scheduled `send` runs execute the staged
+> pipeline from DESIGN_V2.md instead of the legacy summarizer. Everything in
+> this manual (scheduling, once-per-day, dry runs, logs) works the same.
+> New maintenance verbs: `digest projects list|confirm|set-goal|rollback`,
+> `digest assign <unit> <project>`, `digest prune --keep-days 90`.
+
 ## One-time setup (the only manual steps, ever)
 
 ```powershell

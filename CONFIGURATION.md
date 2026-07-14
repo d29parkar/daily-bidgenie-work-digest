@@ -114,3 +114,27 @@ integrations:
 Enabling these today only adds an "enabled but not yet implemented" note to
 the report's coverage section; the actual read-only ingesters are a documented
 follow-up.
+
+## v2 pipeline keys
+
+```yaml
+pipeline:
+  engine: v2                       # v2 = staged pipeline (default in example); v1 = legacy summarizer
+  retire_after_days: 21            # pause projects with no work units for N days
+  registry_export_path: data\registry.md
+  trello_skill_paths:              # your SKILL.md voice files; vendored copies are the fallback
+    - '%USERPROFILE%\...\trello-card-update-skill\SKILL.md'
+
+models:
+  provider: auto                   # auto | openai | anthropic | fixture | none
+  extract: gpt-4o-mini             # per-session work-unit extraction
+  state: gpt-4o                    # project memory updates (few calls; strong model)
+  render: gpt-4o-mini              # trello card voice rendering
+  openai_api_key_env: OPENAI_API_KEY
+  anthropic_api_key_env: ANTHROPIC_API_KEY
+  timeout_seconds: 120
+```
+
+`provider: auto` prefers OpenAI when its key is set, falls back to Anthropic
+(with a model-name swap), and otherwise runs degraded: deterministic activity
+reports, project memory untouched. `digest doctor` shows the resolved setup.

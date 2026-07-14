@@ -1,152 +1,217 @@
 # Daily Work Digest
 
-A local work-memory agent. It reads your coding-agent sessions (Claude Code,
-Codex), your git activity, and your notes, and turns them into two daily
-reports: a morning **Daily Work Brief** and a night **End-of-Day Work Digest**.
-After one-time setup it runs on its own through Windows Task Scheduler and
-emails you the report. You do not run anything manually.
+An agent-native work-memory layer. It reads the raw transcripts of your
+coding-agent sessions (Claude Code, Codex), cross-checks what the agents
+*claimed* against what git actually shows, and maintains an evolving,
+per-project picture of what you are building and why. That picture is
+delivered three ways every day, automatically:
 
-I built this because context evaporates between coding sessions. By the next
-morning I had usually lost track of what was finished, what broke, what the
-reviewer asked for, and what to tell the coding agent next. The information was
-already sitting in transcripts, git history, and notes; nothing was reading it
-back to me. This does.
+- a night **End-of-Day Work Digest** email,
+- a morning **Daily Work Brief** email,
+- a midday **Trello card** written in your own voice.
 
-## What you get every morning
+I built this because I don't write most of my code by hand anymore; I drive
+coding agents. The real record of my work is the prompt/response transcript,
+not the diff. Generic summarizers read the diff and tell you *what files
+changed*. This reads the conversation and tells you *what you were trying to
+do, whether it actually happened, and what is still open*, and it remembers
+the answer from day to day.
 
-The Daily Work Brief covers:
+## What makes it different
 
-1. Executive summary
-2. Yesterday's completed work
-3. Open bugs / unresolved questions
-4. Decisions made
-5. What needs testing
-6. Trello-ready updates (paste-ready, first person, no fluff)
-7. Prompts to send to coding agents (paste-ready, scoped, specific)
-8. Top 3 tasks for today, with the first 60 to 90 minutes spelled out
-9. People to follow up with
-10. Source coverage and missing inputs
+**It reads the primary source.** Claude Code and Codex session files are ~98%
+tool output and injected context. The harvester parses the transcript schema
+properly: your prompts verbatim, the agent's prose, tool calls with failure
+tails, files touched, compaction events. The ~1.5% that is signal, and nothing
+else, feeds the pipeline.
 
-The night digest closes the day: what changed, what is actually done versus in
-progress, blockers, risky or untested changes, and notes so tomorrow starts
-with execution instead of re-orienting.
+**Claims are not facts.** An agent saying "done, all tests pass" is a claim.
+Every work unit is graded against ground truth by plain set intersection, no
+LLM in the loop: files in a commit = *landed*; a Codex harness-applied patch =
+*applied*; dirty-tree overlap = *implemented, not committed*; a "done" claim
+with no repo evidence = *claimed done, repo disagrees*, in its own section.
 
-There is also a midday Trello mode (weekdays 12:45 PM by default): a
-paste-ready card that leads with a "Bigger picture" paragraph on where the
-workstream stands, then the short "Today's Update" lines, built from the
-morning's coding-agent sessions.
+**It has memory.** A persistent project registry (SQLite) holds each project's
+goal, current state, and open threads with ages. Each night's run merges
+today's verified work into that state, so tomorrow's brief starts from an
+evolving understanding, not a 48-hour amnesia window. `data/registry.md` is a
+human-readable mirror of what the system currently believes.
 
-Every claim in the report cites its source (`[S1]` for a session or note,
-`[G1]` for git) and is labeled (observed) or (inferred). Anything shaky goes
-into a "Needs verification" section instead of being stated as fact. The point
-is a report you can trust, not a report that sounds impressive.
+**Projects stay separate.** Work is attributed to projects by the session's
+working directory (deterministic, no guessing). Unknown directories become
+*provisional* projects surfaced in the digest for a one-command confirm; a
+misattribution is fixed once (`digest assign`) and stays fixed.
 
-## What it ingests
+**Incidental noise is quarantined.** Fixing a broken venv or a stuck container
+is troubleshooting, not project work. Those units are footnoted in the night
+digest and never reach project memory or the Trello card.
 
-| Source | How | Default |
-|---|---|---|
-| Claude Code sessions | `~/.claude/projects`, `~/.claude/sessions` (JSONL) | on |
-| Codex sessions | `~/.codex/sessions` (JSONL) | on |
-| ChatGPT exports / notes / task lists | drop files into `notes/manual/` or `notes/reviewer/` | on |
-| Git state | branch, status, commits, diff stats for configured repos | on |
-| Gmail | read-only, behind a config flag | off (stub, see [docs/GOOGLE_INTEGRATIONS.md](docs/GOOGLE_INTEGRATIONS.md)) |
-| Google Calendar | read-only, behind a config flag | off (stub) |
+**The Trello card sounds like you.** The card renderer embeds your actual
+Trello-writing skill files (SKILL.md) as its system prompt, hash-logged per
+run. If the LLM is unavailable the fallback card is explicitly marked RAW so
+an off-voice card never gets pasted by accident.
 
-Sessions are filtered to the repos you name in config, so unrelated chats stay
-out of the report. Missing sources degrade gracefully and are listed in every
-report under "Source coverage and missing inputs".
+**Every claim has provenance.** Digest lines cite the exact work unit, which
+maps to a session file and turn range on disk. Coverage and run-health lines
+are always computed locally, never generated by a model.
 
-Everything runs locally. The only things that leave your machine are the
-evidence snippets sent to the OpenAI API for summarization (only if you set a
-key) and the digest email you send to yourself.
+## What a night digest looks like
+
+```
+## bidgenie-sakesh-fastapi
+
+Goal: Implement and optimize the production system for RFP analysis ...
+Today: Today initiated the implementation of production changes for
+DeepSeek v3.2, starting with the model-change-validation branch ...
+
+Landed (verified against commits):
+- Implement production changes based on the DeepSeek v3.2 diagnostic
+  (commit:6856f490ed62, commit:9b8d929fdebc) [claude:9f5d27d1...:2]
+
+Claimed done, repo disagrees:
+- Review BeastDB for recent RFP analysis runs ... [claude:57cf59cb...:1]
+
+Course corrections I gave the agent:
+- This is only diagnostic and not implementation.
+
+Open threads:
+- Agent claimed DeepSeek v3.2 diagnostic report generated; repo shows
+  no change. (since 2026-07-13)
+```
 
 ## Setup
 
-Requires Python 3.12+ on Windows. From the project folder:
+Requires Python 3.12+ on Windows and git. From the project folder:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
-Copy-Item config.example.yaml config.yaml   # set your repos; %USERPROFILE% paths work as-is
-Copy-Item .env.example .env                 # add OPENAI_API_KEY + SMTP creds (both optional)
+Copy-Item config.example.yaml config.yaml   # set your repos + skill paths
+Copy-Item .env.example .env                 # OPENAI_API_KEY (or ANTHROPIC_API_KEY) + SMTP creds
 ```
 
 Try it:
 
 ```powershell
-.\.venv\Scripts\python.exe -m digest.cli doctor              # health check
-.\.venv\Scripts\python.exe -m digest.cli generate --mode morning
-.\.venv\Scripts\python.exe -m digest.cli send --mode morning --dry-run
+.\.venv\Scripts\python.exe -m digest.cli doctor                       # health check
+.\.venv\Scripts\python.exe -m digest.cli pipeline --mode night --print
+.\.venv\Scripts\python.exe -m digest.cli send --mode night --dry-run
 ```
 
 Install the automation (one time):
 
 ```powershell
-.\scripts\install_windows_task.ps1     # morning 9:00 + logon, night 21:30
+.\scripts\install_windows_task.ps1   # morning 9:00 + logon catch-up, trello 12:45, night 21:30
 ```
 
-That's it. Reports land in `outputs/digests/`, logs in `outputs/logs/`, and
-`digest doctor` tells you if anything is off.
+Reports land in `outputs/digests/`, logs in `outputs/logs/`, and
+`digest doctor` tells you if anything is off. Without any API key the system
+still runs end to end: it produces a deterministic activity report, clearly
+labeled, and leaves project memory untouched rather than corrupting it.
 
 ## CLI
 
 ```text
-digest doctor                      health check: config, paths, env vars, scheduler
-digest ingest                      refresh sources into SQLite
-digest generate --mode morning     write markdown + email text (also: night)
-digest send --mode morning --dry-run       render only, never send
-digest send --mode morning --once-per-day  send once; later runs skip
-digest send --mode morning --force         resend even if already sent today
+digest doctor                          health check: config, keys, scheduler, registry
+digest pipeline --mode night --print   run the pipeline and print the digest
+digest send --mode night --once-per-day    generate + email (scheduler entry point)
+digest projects list                   show the registry (goals, status, trello scope)
+digest projects confirm <id>           accept a provisionally detected project
+digest projects set-goal <id> "..."    correct a project's goal by hand
+digest projects rollback <id> <date>   revert project memory to an earlier day
+digest assign <unit_key> <project>     reassign a work unit (sticky override)
+digest prune --keep-days 90            drop old stored turn text (ids/provenance kept)
 ```
 
-## How summarization works
+`digest ingest` / `generate` and the legacy single-call summarizer still exist
+behind `pipeline.engine: v1` in config.
 
-With `OPENAI_API_KEY` set, an OpenAI model (default `gpt-4o-mini`, one config
-line to change) writes the report from a tagged evidence pack and is required
-to cite it. Without a key, or when the API fails, a deterministic rule-based
-fallback produces the same report skeleton and the header says so. Tests run
-fully offline against a fixture provider; no test ever calls the real API.
+## Cost and degradation
 
-The prompt templates live in `src/digest/prompts/` and are meant to be edited.
-Mine encode how I like status updates written (short, first person, exact
-function and file names, no vague progress language) and how I write prompts
-for coding agents (inspect first, come back with A/B/C, do not propose broad
-rewrites). Change them to match how you work.
-
-## Email and scheduling
-
-`digest send` uses SMTP (for Gmail, an app password). Without credentials it
-still generates and saves the report, prints a loud "EMAIL NOT SENT" note, and
-exits 0 so scheduled runs stay green. `--once-per-day` guarantees at most one
-real email per mode per day; a failed send retries on the next trigger.
-
-The installer registers two per-user scheduled tasks (morning has a
-5-minutes-after-logon trigger too, for days the laptop was asleep at 9:00).
-If the ScheduledTasks cmdlets are blocked it falls back to `schtasks.exe` plus
-a Startup-folder shortcut, verifies both tasks, and fails loudly otherwise.
+A typical day is a handful of `gpt-4o-mini` extraction calls (one per
+session), one `gpt-4o` state-update call per active project, and one render
+call for the Trello card: roughly $0.05-0.10/day. Each stage fails safe:
+extraction failures degrade to activity-only stubs, state-update failures
+leave yesterday's memory intact, Trello failures emit a marked-raw card, and
+every degradation is printed in the digest's run notes.
 
 ## Documentation
 
-- [ARCHITECTURE.md](ARCHITECTURE.md): how ingestion, SQLite tracking, and summarization work
+- [DESIGN_V2.md](DESIGN_V2.md): the full v2 design, schema findings from real
+  session files, data contracts, and rejected alternatives
+- [ARCHITECTURE.md](ARCHITECTURE.md): module map (v1 engine internals)
 - [CONFIGURATION.md](CONFIGURATION.md): every config key and environment variable
 - [OPERATING_MANUAL.md](OPERATING_MANUAL.md): scheduling, manual runs, verifying the next run
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md): common failures and fixes
-- [docs/GOOGLE_INTEGRATIONS.md](docs/GOOGLE_INTEGRATIONS.md): Gmail/Calendar integration plan
 
 ## Development
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -e .[dev]
-.\.venv\Scripts\python.exe -m pytest -q      # offline, mocked OpenAI
-.\scripts\smoke_test.ps1                     # full end-to-end smoke test
+.\.venv\Scripts\python.exe -m pytest -q      # fully offline; scripted/fixture LLMs
 ```
 
-## Known limitations
+## Architecture
 
-- Gmail/Calendar/Trello ingestion are documented stubs, not implemented.
-- Terminal logs are only picked up if they land in a configured folder as
-  `.log`/`.txt` files.
-- The rule-based fallback cannot extract "decisions made" reliably; it says so
-  instead of guessing.
-- Lookback windows compare local-time ISO strings, so a timezone change
-  mid-day can shift what falls inside the window.
+```mermaid
+flowchart TD
+    subgraph Sources
+        CC["Claude Code sessions<br/>~/.claude/projects/&lt;cwd&gt;/&lt;uuid&gt;.jsonl"]
+        CX["Codex sessions<br/>~/.codex/sessions/rollout-*.jsonl"]
+        GIT["git repos<br/>commits · status · diffs"]
+        GH["GitHub PRs (optional, gh CLI)"]
+    end
+
+    subgraph "S1 Harvest (deterministic)"
+        H["Schema-aware parsers<br/>turns = prompts + agent prose + tools + files<br/>strips ~98% noise"]
+    end
+
+    subgraph "S2 Extract (LLM, per session)"
+        E["Work units:<br/>intent · kind · status claim<br/>claims-to-verify · corrections<br/>incidental flag"]
+    end
+
+    subgraph "S3 Attribute (deterministic)"
+        A["Project registry matchers<br/>cwd prefix &gt; keyword &gt; branch<br/>unknown cwd ⇒ provisional project"]
+    end
+
+    subgraph "S4 Corroborate (deterministic)"
+        C["Claims × ground truth<br/>landed / applied / uncommitted /<br/>unverified / contradicted"]
+    end
+
+    subgraph "S5 State update (LLM, per project, night)"
+        S["Project memory:<br/>goal · system state ·<br/>open threads · daily delta<br/>versioned, rerun-safe"]
+    end
+
+    subgraph "S6 Render"
+        RN["Night digest<br/>(deterministic assembly)"]
+        RM["Morning brief<br/>(deterministic assembly)"]
+        RT["Trello card<br/>(LLM + your SKILL.md voice)"]
+    end
+
+    subgraph "S7 Deliver"
+        EM["SMTP email<br/>write-before-send · once per day"]
+        OUT["outputs/digests/*.md"]
+        REG["data/registry.md mirror"]
+    end
+
+    DB[("SQLite<br/>sessions · turns · work units ·<br/>projects · state versions · facts · runs")]
+
+    CC --> H
+    CX --> H
+    H --> DB
+    DB --> E --> DB
+    DB --> A --> DB
+    GIT --> C
+    GH --> C
+    DB --> C --> DB
+    DB --> S --> DB
+    S --> REG
+    DB --> RN & RM & RT
+    RN & RM & RT --> OUT --> EM
+
+    CORR["Human corrections<br/>digest projects · digest assign"] -.->|sticky overrides| DB
+```
+
+The invariant behind the whole design: **user prompts are the authority on
+intent, agent prose is a claim, and only git/harness evidence can promote a
+claim to a fact.** Everything else is plumbing to enforce that cheaply.

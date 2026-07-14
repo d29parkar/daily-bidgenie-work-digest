@@ -1,5 +1,26 @@
 # Architecture
 
+## v2 pipeline (current default engine)
+
+`pipeline.engine: v2` in config routes `generate`/`send` through the staged
+pipeline described in [DESIGN_V2.md](DESIGN_V2.md) (see the README for the
+diagram). Modules:
+
+| Module | Stage | Responsibility |
+|---|---|---|
+| `harvest.py`, `harvest_claude.py`, `harvest_codex.py` | S1 | schema-aware session discovery + parsing into `sessions_v2`/`turns_v2` |
+| `extract.py` + `prompts/v2_extract_*.md` | S2 | per-session LLM extraction of work units (intent, status claims, incidental flag); stub fallback |
+| `attribute.py` | S3 | deterministic project attribution against the registry; provisional project proposal; idle retirement |
+| `corroborate.py` | S4 | git commit/status facts, optional gh PR facts (review direction enforced in code), claim verdicts by set intersection |
+| `state_update.py` + `prompts/v2_state_system.md` | S5 | per-project memory updates (night only), citation validation, `data/registry.md` mirror |
+| `render_v2.py` | S6 | deterministic night/morning assembly; LLM Trello card using the configured SKILL.md voice files (vendored fallback in `prompts/vendored/`) |
+| `pipeline.py` | S1-S7 | checkpointed orchestrator; `generate_digest_v2` twin of the v1 generator so email/idempotency reuse v1 plumbing |
+| `store_v2.py` | all | `*_v2` tables in the same SQLite file; deterministic keys make reruns idempotent |
+| `llm_v2.py` | S2/S5/S6 | per-role providers: openai, anthropic, fixture, none (degraded mode) |
+
+Everything below this line describes the **legacy v1 engine**
+(`pipeline.engine: v1`), which remains available and untouched.
+
 ## Overview
 
 ```

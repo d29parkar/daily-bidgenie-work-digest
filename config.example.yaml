@@ -88,3 +88,29 @@ integrations:
     enabled: false
   calendar:
     enabled: false
+
+# ---------------------------------------------------------------------------
+# v2 pipeline (DESIGN_V2.md): multi-stage, project-registry-backed digests.
+# engine: v2 runs harvest -> extract -> attribute -> corroborate -> state ->
+# render for generate/send. engine: v1 keeps the legacy single-call
+# summarizer. `digest pipeline --mode night --print` runs v2 regardless.
+pipeline:
+  engine: v2
+  retire_after_days: 21           # pause projects with no work for N days
+  registry_export_path: data\registry.md
+  # Your Trello writing skill files. The card renderer embeds them verbatim;
+  # vendored copies in src/digest/prompts/vendored/ are the fallback.
+  trello_skill_paths:
+    - '%USERPROFILE%\projects\my-api-repo\.claude\skills\trello-card-update-skill\SKILL.md'
+
+# Per-role models for the v2 pipeline. provider: auto prefers OpenAI when
+# OPENAI_API_KEY is set, else Anthropic when ANTHROPIC_API_KEY is set, else
+# runs degraded (deterministic activity report, registry untouched).
+models:
+  provider: auto                  # auto | openai | anthropic | fixture | none
+  extract: gpt-4o-mini            # per-session work-unit extraction (many small calls)
+  state: gpt-4o                   # project memory updates (few calls; use a strong model)
+  render: gpt-4o-mini             # trello card voice rendering
+  openai_api_key_env: OPENAI_API_KEY
+  anthropic_api_key_env: ANTHROPIC_API_KEY
+  timeout_seconds: 120
